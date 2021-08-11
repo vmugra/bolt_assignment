@@ -1,0 +1,554 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "id": "fd3386f8",
+   "metadata": {},
+   "source": [
+    "# Data analysis on Bolt Upfront pricing precision"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "de5c46b0",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "install.packages(\"dplyr\")\n",
+    "install.packages(\"readr\")\n",
+    "install.packages(\"tidyverse\")\n",
+    "install.packages(\"tidyr\")\n",
+    "install.packages(\"dbplyr\")\n",
+    "install.packages(\"pacman\")\n",
+    "install.packages(\"ggplot2\")\n",
+    "install.packages(\"reshape2\")\n",
+    "install.packages(\"rpart\")\n",
+    "install.packages(\"raprt.plot\")\n",
+    "install.packages(\"forecast\")\n",
+    "install.packages(\"RCurl\")\n",
+    "install.packages(\"caret\", dependencies = TRUE)\n",
+    "\n",
+    "library(\"tidyverse\")\n",
+    "library(\"readr\")\n",
+    "library(\"dplyr\")\n",
+    "library(\"tidyr\")\n",
+    "library(\"stringi\")\n",
+    "library(\"ggplot2\")\n",
+    "library(\"reshape2\")\n",
+    "library(\"RCurl\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "f54b9cf6",
+   "metadata": {},
+   "source": [
+    "## Data download and cleaning"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "0d42296d",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "#Downloading data from GitHub\n",
+    "dataURL <- \"https://raw.githubusercontent.com/vmugra/assignments/main/test.csv\"\n",
+    "rawdatabolt <- read.csv(url(dataURL))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "babcab57",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "#clearing N/A rows on prices, in the analysis empty rows on either upfron price or metered price columns will not be used  as the comparison between upfront and metered is required to decide which pricing to use\n",
+    "boltdata <- rawdatabolt[!is.na(rawdatabolt$upfront_price), ]\n",
+    "boltdata <- boltdata[!is.na(boltdata$metered_price), ]\n",
+    "\n",
+    "# Calculating the % diffrenece of the estimated upfront fee from the metered price\n",
+    "boltdata <- boltdata %>%\n",
+    "  mutate(Diff = ((upfront_price*100)/metered_price))\n",
+    "\n",
+    "# When Difference between metered and upfront is less than 20% upfront pricing is used, upfront is marked as 1, metered is marked as 0\n",
+    "boltdata <- boltdata %>%\n",
+    "  mutate(pricingdummy = case_when(Diff == 20 ~ '0', \n",
+    "                                  Diff > 20 ~ '0', \n",
+    "                                  Diff < 20 ~ '1'), \n",
+    "         pricingused = case_when(Diff == 20 ~ 'Metered', \n",
+    "                                  Diff > 20 ~ 'Metered', \n",
+    "                                  Diff < 20 ~ 'Upfront'))"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "72aaa65c",
+   "metadata": {},
+   "source": [
+    "## Figure 1 - Metered vs Upfront price usage"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "cc314934",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "V1 <- boltdata %>%\n",
+    "  ggplot(aes(pricingused))\n",
+    "V1 + \n",
+    "  geom_bar(fill = '#31D287')+\n",
+    "  theme()+\n",
+    "  labs(\n",
+    "    title = \"Figure 1 - Pricing method used as the final price\",\n",
+    "    x = NULL,\n",
+    "    y = \"Count of rides\")\n",
+    "\n",
+    "sum(boltdata$pricingused == \"Metered\")/3409"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "1fdae2c2",
+   "metadata": {},
+   "source": [
+    "## Figure 2 & 3 - the diffrence of metered vs upfront prices vs metered prices"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "52569baf",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "#Figure 2\n",
+    "ggplot(boltdata) + \n",
+    "  geom_point(aes(x= boltdata$Diff, y=boltdata$metered_price), color = '#31D287') +\n",
+    "  theme()+\n",
+    "  labs(title = \"Figure 2 - % of price difference between Upfront and Metered price\", x = \"% of difference\", y = \"Metered Price\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "8629baf0",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "#Figure 3\n",
+    "ggplot(boltdata) + geom_point(aes(x= boltdata$Diff, y=boltdata$metered_price), color = '#31D287')+\n",
+    "  theme()+\n",
+    "  labs(title = \"Figure 3 - % of price difference between Upfront and Metered price\",\n",
+    "       subtitle = \"Excluding outliers over 50,000 in Metered price and 200% of price difference\", x = \"% of difference\", y = \"Metered Price\")+\n",
+    "  coord_cartesian(xlim =  c(0,200), ylim = c(0,50000))"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "91c2aa85",
+   "metadata": {},
+   "source": [
+    "## Figure 4 & 5 - time vs upfront and metered fees, per hour and per hour and minute"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "c1c41ac0",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "#Creating hour and hour:minute columns\n",
+    "boltdata$date_created <- as.Date(boltdata$calc_created)\n",
+    "class(boltdata$calc_created) #character will be changed into timestamp\n",
+    "boltdata$time_created <- format(as.POSIXct(boltdata$calc_created), format = \"%H:%M\")\n",
+    "boltdata$hour_created <- format(as.POSIXct(boltdata$calc_created), format = \"%H\")\n",
+    "\n",
+    "boltdataG4 <- data.frame(Hour = boltdata$hour_created, Metered = boltdata$metered_price, Upfront = boltdata$upfront_price)\n",
+    "boltdataG4_long <- melt(boltdataG4)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "f5606b60",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "V4 <- ggplot(data = boltdataG4_long, mapping = aes(x = Hour , y = value, z= variable, fill = variable))\n",
+    "V4 +\n",
+    "  geom_boxplot()+\n",
+    "  scale_fill_manual(values = c(\"#31D287\", \"#b175ff\"))+\n",
+    "  theme()+\n",
+    "  labs(\n",
+    "    title = \"Figure 4 - Upfront vs Metered prices per hour\",\n",
+    "    x = \"Hour\",\n",
+    "    y = \"Price value\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "f9a0faca",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "V4 <- ggplot(data = boltdataG4_long, mapping = aes(x = Hour , y = value, z= variable, fill = variable))\n",
+    "V4 +\n",
+    "  geom_boxplot()+\n",
+    "  scale_fill_manual(values = c(\"#31D287\", \"#b175ff\"))+\n",
+    "  theme()+\n",
+    "  labs(\n",
+    "    title = \"Figure 5 - Upfront vs Metered prices per hour\",\n",
+    "    subtitle = \"Excluding outliers over 10,000 in price value\",\n",
+    "    x = \"Hour\",\n",
+    "    y = \"Price value\")+\n",
+    "  coord_cartesian(ylim=c(0,10000))"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "7d30937f",
+   "metadata": {},
+   "source": [
+    "## Figure 6, 7 & 8 - Price variaton on different weekdays"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "66b24e85",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "#Clearing data\n",
+    "boltdata$weekday <- weekdays(boltdata$date_created)\n",
+    "boltdata$weekday <- case_when(boltdata$weekday == \"esmasp‰ev\" ~ 'Monday',\n",
+    "                              boltdata$weekday == \"teisip‰ev\" ~ 'Tuesday',\n",
+    "                              boltdata$weekday == \"kolmap‰ev\" ~ 'Wednesday',\n",
+    "                              boltdata$weekday == \"neljap‰ev\" ~ 'Thursday',\n",
+    "                              boltdata$weekday == \"reede\" ~ 'Friday',\n",
+    "                              boltdata$weekday == \"laup‰ev\" ~ 'Saturday',\n",
+    "                              boltdata$weekday == \"p¸hap‰ev\" ~ 'Sunday')\n",
+    "\n",
+    "\n",
+    "boltdataG5 <- data.frame(weekday = boltdata$weekday, Metered = boltdata$metered_price, Upfront = boltdata$upfront_price)\n",
+    "boltdataG5_long <- melt(boltdataG5)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "d412e6e8",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "V5 <- ggplot(data = boltdataG5_long, mapping = aes(x = ordered(boltdataG5_long$weekday, levels = c(\"Monday\", \"Tuesday\", \"Wednesday\", \"Thursday\", \"Friday\", \"Saturday\", \"Sunday\")), y , y = value, z= variable, fill = variable))\n",
+    "V5 +\n",
+    "  geom_boxplot()+\n",
+    "  scale_fill_manual(values = c(\"#31D287\", \"#b175ff\"))+\n",
+    "  theme()+\n",
+    "  labs(\n",
+    "    title = \"Figure 6 - Upfront vs Metered prices per weekday\",\n",
+    "    x = \"Weekday\",\n",
+    "    y = \"Price value\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "e12a771b",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "V5 <- ggplot(data = boltdataG5_long, mapping = aes(x = ordered(boltdataG5_long$weekday, levels = c(\"Monday\", \"Tuesday\", \"Wednesday\", \"Thursday\", \"Friday\", \"Saturday\", \"Sunday\")), y , y = value, z= variable, fill = variable))\n",
+    "V5 +\n",
+    "  geom_boxplot()+\n",
+    "  scale_fill_manual(values = c(\"#31D287\", \"#b175ff\"))+\n",
+    "  theme()+\n",
+    "  labs(\n",
+    "    title = \"Figure 7 - Upfront vs Metered prices per weekday\",\n",
+    "    subtitle = \"Excluding outliers over 10,000 in price value\",\n",
+    "    x = \"Weekday\",\n",
+    "    y = \"Price value\")+\n",
+    "  coord_cartesian(ylim=c(0,10000))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "2d8c1e1b",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "V5 <- ggplot(data = boltdataG5_long, mapping = aes(x = ordered(boltdataG5_long$weekday, levels = c(\"Monday\", \"Tuesday\", \"Wednesday\", \"Thursday\", \"Friday\", \"Saturday\", \"Sunday\")), y , y = value, z= variable, fill = variable))\n",
+    "V5 +\n",
+    "  geom_boxplot()+\n",
+    "  scale_fill_manual(values = c(\"#31D287\", \"#b175ff\"))+\n",
+    "  theme()+\n",
+    "  labs(\n",
+    "    title = \"Figure 8 - Upfront vs Metered prices per weekday\",\n",
+    "    subtitle = \"Excluding outliers over 50 in price value\",\n",
+    "    x = \"Weekday\",\n",
+    "    y = \"Price value\")+\n",
+    "  coord_cartesian(ylim=c(0,50))"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "35603202",
+   "metadata": {},
+   "source": [
+    "## Regeression analysis on price affecting factors"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "6fa92a13",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "boltR1data <- boltdata\n",
+    "\n",
+    "boltR1data$fraud_score[is.na(boltR1data$fraud_score)] <- 0 #if fraud score NA put it to 0\n",
+    "boltR1data <- boltR1data %>%\n",
+    "  mutate(fraud_dummy = case_when(fraud_score != 0  ~ '1',\n",
+    "                                 fraud_score == 0  ~ '0'))\n",
+    "                                 boltR1data <- boltR1data %>%\n",
+    "  mutate(operation_system = case_when(str_sub(boltR1data$device_name, start = 1, end = 6) == 'iPhone'  ~ 'IOS',\n",
+    "                                      str_sub(boltR1data$device_name, start = 1, end = 6) != 'iPhone'  ~ 'Android'))\n",
+    "\n",
+    "boltR1data$change_reason_pricing[is.na(boltR1data$change_reason_pricing)] <- \"none\" #if reason change in price type NA put it to 0\n",
+    "\n",
+    "boltR1data$driver_app_version <- str_sub(boltR1data$driver_app_version, start = 4, end = 4) #Only version number\n",
+    "boltR1data$rider_app_version <- str_sub(boltR1data$rider_app_version, start = 4, end = 4) #Only version number\n",
+    "boltR1data$device_name <- sub(\" .*$\", \"\", boltR1data$device_name) #Only device brands\n",
+    "\n",
+    "drop <- c(\"device_token\", \"b_state\", \"order_try_state\", \"prediction_price_type\")\n",
+    "df = boltR1data[,!(names(boltR1data) %in% drop)] #deleting empty or single-value columns"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "60c8faa9",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "boltR1 <- lm(formula = pricingdummy ~ \n",
+    "               gps_confidence +\n",
+    "               entered_by +\n",
+    "               dest_change_number +\n",
+    "               change_reason_pricing +\n",
+    "               rider_app_version +\n",
+    "               order_state +\n",
+    "               driver_app_version +\n",
+    "               device_name +\n",
+    "               operation_system +\n",
+    "               eu_indicator +\n",
+    "               overpaid_ride_ticket +\n",
+    "               fraud_dummy +\n",
+    "               hour_created +\n",
+    "               weekday,\n",
+    "             data = boltR1data)\n",
+    "options(scipen = 999)\n",
+    "summary(boltR1)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "d819bc7d",
+   "metadata": {},
+   "source": [
+    "## Figure 9 - fraud_dummy vs upfront and metered fees"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "30b3ad48",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "boltdataG6 <- data.frame(fraud = boltR1data$fraud_dummy, diff = boltR1data$Diff)\n",
+    "V6 <- ggplot(boltdataG6, aes(x = fraud, y = diff))\n",
+    "\n",
+    "V6 + \n",
+    "  geom_boxplot(fill = \"#31D287\")+\n",
+    "  theme()+\n",
+    "  labs(\n",
+    "    title =\"Figure 9 - Fraud score vs price differences\", \n",
+    "    x = \"Fraud Score existence\", y = \"Price diffrenrence in %\") + \n",
+    "  coord_cartesian(ylim = c(0,400))"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "8cdf4481",
+   "metadata": {},
+   "source": [
+    "## Figure 10 - phone provider vs % of price difference"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "c8c49c69",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "boltdataG7 <- data.frame(provider = boltR1data$phone_provider, diff = boltR1data$Diff)\n",
+    "V7 <- ggplot(boltdataG7, aes(x = provider, y = diff))\n",
+    "\n",
+    "V7 + \n",
+    "  geom_boxplot(fill = \"#31D287\")+\n",
+    "  theme()+\n",
+    "  labs(\n",
+    "    title =\"Figure 10 - Phone Operation System vs price differences\", \n",
+    "    x = NULL, y = \"Price diffrenrence in %\") + \n",
+    "  coord_cartesian(ylim = c(0,200))"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "e237ea6f",
+   "metadata": {},
+   "source": [
+    "## Decision tree model on price affecting factors"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "943a4667",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "install.packages(\"randomForest\")\n",
+    "library(randomForest)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "8fcbc801",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "RFdata <- data.frame(\"GPS connection\" = boltR1data$gps_confidence, \n",
+    "                     \"Address entered by\" = boltR1data$entered_by,\n",
+    "                     boltR1data$dest_change_number,\n",
+    "                     boltR1data$change_reason_pricing,\n",
+    "                     boltR1data$rider_app_version,\n",
+    "                     boltR1data$order_state,\n",
+    "                     boltR1data$driver_app_version,\n",
+    "                     boltR1data$device_name,\n",
+    "                     boltR1data$operation_system,\n",
+    "                     boltR1data$eu_indicator,\n",
+    "                     boltR1data$overpaid_ride_ticket,\n",
+    "                     boltR1data$fraud_dummy,\n",
+    "                     boltR1data$hour_created,\n",
+    "                     boltR1data$weekday)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "544c392d",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "random_forest <- randomForest(as.factor(pricingdummy) ~ \n",
+    "                                gps_confidence +\n",
+    "                                entered_by +\n",
+    "                                dest_change_number +\n",
+    "                                change_reason_pricing +\n",
+    "                                rider_app_version +\n",
+    "                                order_state +\n",
+    "                                driver_app_version +\n",
+    "                                device_name +\n",
+    "                                operation_system +\n",
+    "                                eu_indicator +\n",
+    "                                overpaid_ride_ticket +\n",
+    "                                fraud_dummy +\n",
+    "                                hour_created +\n",
+    "                                weekday,\n",
+    "                              data = boltR1data, ntree = 1000,\n",
+    "                              mtry = 1, nodesize = 5, importance = TRUE)\n",
+    "\n",
+    "varImpPlot(random_forest, type = 1)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "3b2e3505",
+   "metadata": {},
+   "source": [
+    "## Comparing time vs distance difference vs prices differences"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "ec985342",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "boltdata2 <- data.frame(ID = boltdata$order_id_new, \n",
+    "                        Upfront_price = boltdata$upfront_price, \n",
+    "                        Distance_predicted = boltdata$predicted_distance, \n",
+    "                        Duration_predicted = boltdata$predicted_duration, \n",
+    "                        Metered_price = boltdata$metered_price,\n",
+    "                        Distance_real = boltdata$distance,\n",
+    "                        Duration_real = boltdata$duration,\n",
+    "                        Price_diff = ((boltdata$upfront_price*100)/boltdata$metered_price),\n",
+    "                        Distance_diff = ((boltdata$predicted_distance*100)/boltdata$distance),\n",
+    "                        Duration_diff= ((boltdata$predicted_duration*100)/boltdata$duration)) "
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "7c374a96",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "ggplot(boltdata2) + \n",
+    "  geom_line(aes(x = Price_diff, y = Distance_real, group = 1, colour = \"Real distance\"), size = 0.5) +\n",
+    "  geom_line(aes(x = Price_diff, y = Distance_predicted, colour = \"Predicted distance\"), size = 0.5)+\n",
+    "  labs(title = \"Figure 11 - Price difference vs Distance\", y = \"Distance\", x=\"% of Price Difference\")+\n",
+    "  coord_cartesian(xlim = c(0,1000), ylim = c(0,25000))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "de9cb4d0",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "ggplot(boltdata2) + \n",
+    "  geom_line(aes(x = Price_diff, y = Duration_real, colour = \"Duration_real\"), size =  0.5) +\n",
+    "  geom_line(aes(x = Price_diff, y = Duration_predicted, colour = \"Duration_predicted\"), size = 0.5)+\n",
+    "  labs(title = \"Figure 12 - Price difference vs Duration\", y = \"Duration\", x=\"% of Price Difference\")+\n",
+    "  coord_cartesian(xlim = c(0,200), ylim = c(0,10000))"
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "R",
+   "language": "R",
+   "name": "ir"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 5
+}
